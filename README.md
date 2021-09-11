@@ -3,6 +3,9 @@ https://github.com/blaze/odo/blob/master/odo/core.py
 
 
 ## TODO
+- [ ] SQLAlchemy integration
+- [ ] Test with container types (recurse until scalar?)
+- [ ] Test with nested types/models
 - [RegexDispatcher](https://github.com/blaze/odo/blob/master/odo/regex.py#L28)
 
 ## Inspo
