@@ -1,14 +1,22 @@
 import itertools
 from dataclasses import dataclass
-from typing import Dict, Generic, Iterable, Iterator, Tuple, Type, TypeVar, cast
+from typing import (
+    Callable,
+    Dict,
+    Generic,
+    Iterable,
+    Iterator,
+    Tuple,
+    Type,
+    TypeVar,
+    cast,
+)
 from warnings import warn
 from graphene.types.objecttype import ObjectType, ObjectTypeOptions
 import graphene
 from graphene.types.scalars import Scalar
-from graphene.types.utils import get_underlying_type
 
 import networkx as nx
-import pydantic
 from devtools import debug
 
 # from networkx.exception import NetworkXNoPath
@@ -31,8 +39,8 @@ class FailedConversionWarning(UserWarning):
         )
 
 
-_S = TypeVar('_S')
-_T = TypeVar('_T')
+_S = TypeVar('_S')  # , bound=type
+_T = TypeVar('_T')  # , bound=type
 
 
 @dataclass
@@ -55,7 +63,9 @@ class ConversionGraph:
     def __call__(self, source, target, **kwargs):
         return self._transform(source=source, target=target, **kwargs)
 
-    def register(self, source, target, cost=1.0):
+    def register(
+        self, source: Type[_S], target: Type[_T], cost=1.0
+    ) -> Callable[[ConverterFunc[_S, _T]], ConverterFunc[_S, _T]]:
         """Decorator that registers a conversion fn between 2 types
 
         Args:
@@ -91,12 +101,12 @@ class ConversionGraph:
 
     def _transform(
         self,
-        target,
-        source,
+        source: _S,
+        target: Type[_T],
         excluded_edges: Iterable[Tuple[type, type]] = None,
         raise_on_errors: bool = False,
         **kwargs,
-    ):
+    ) -> _T:
         """Transform source to target type using graph of transformations"""
         # take a copy so we can mutate without affecting the input
         excluded_edges = (
@@ -106,13 +116,16 @@ class ConversionGraph:
         path = self.path(
             source=type(source), target=target, excluded_edges=excluded_edges
         )
-        path_proxy: IterProxy[ConversionEdge] = IterProxy(path)
+        path_proxy: IterProxy[ConversionEdge[_S, _T]] = IterProxy(path)
 
         step = source
         for edge in path_proxy:
             try:
                 step = edge.func(
-                    step, target=target, excluded_edges=excluded_edges, **kwargs
+                    step,  # type: ignore
+                    target=target,
+                    excluded_edges=excluded_edges,
+                    **kwargs,
                 )
             except NotImplementedError as e:
                 if raise_on_errors:
@@ -151,7 +164,7 @@ class ConversionGraph:
                 #         path = greedy_path
                 path_proxy.it = path
 
-        return step
+        return cast(_T, step)
 
     def _get_conversion_edge(
         self, source: Type[_S], target: Type[_T]
@@ -189,7 +202,8 @@ CONVERTER_FUNCS = {
 
 
 def register_converter_funcs(
-    graph: ConversionGraph, converter_funcs: Dict[Tuple[type, type], ConverterFunc]
+    graph: ConversionGraph,
+    converter_funcs: Dict[Tuple[Type[_S], Type[_T]], ConverterFunc[_S, _T]],
 ):
     for (source, target), func in converter_funcs.items():
         graph.register(source, target)(func)
@@ -206,7 +220,7 @@ if __name__ == "__main__":
         email: EmailStr
 
     @converter.register(BaseModel, dict)
-    def basemodel_to_dict(source: BaseModel, **kwargs):
+    def basemodel_to_dict(source: BaseModel, **kwargs) -> dict:
         debug(source, kwargs)
         return source.dict()
 
@@ -236,13 +250,14 @@ if __name__ == "__main__":
         return res
 
     @converter.register(dict, ObjectType)
-    def dict_to_objecttype(source: dict, target, **kwargs):
+    def dict_to_objecttype(source: dict, target: Type[ObjectType], **kwargs):
         debug(source, kwargs, target)
         return target(**source)
 
     @converter.register(dict, BaseModel)
-    def dict_to_basemodel(source: dict, target, **kwargs):
-        pydantic
+    def dict_to_basemodel(source: dict, target: Type[BaseModel], **kwargs):
+        debug(source, target)
+        return target(**source)
 
     objtype = FromObjectType('asd', 'asd')
     res = converter(source=objtype, target=dict)
